@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Govinda AI</title>
+    <!-- Tailwind CSS for sleek utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel to compile JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Framer Motion for Animations -->
+    <script src="https://unpkg.com/framer-motion@10.12.16/dist/framer-motion.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        body {
+            background-color: #0B0E14;
+            color: #E2E8F0;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            border-radius: 12px;
+        }
+
+        .neon-text {
+            color: #00FFCC;
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.4);
+        }
+
+        .metric-glow {
+            border-left: 4px solid #00FFCC;
+        }
+
+        .metric-glow-danger {
+            border-left: 4px solid #EF4444;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0B0E14;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #00FFCC;
+            border-radius: 50%;
+            margin-right: 4px;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .typing-indicator span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes bounce {
+
+            0%,
+            80%,
+            100% {
+                transform: scale(0);
+            }
+
+            40% {
+                transform: scale(1);
+            }
+        }
+
+        #root {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { motion, AnimatePresence } = window.Motion;
+
+        // Backend URL (FastAPI)
+        const API_URL = "http://localhost:8000";
+
+        // ==========================================
+        // UI COMPONENTS
+        // ==========================================
+
+        const Card = ({ children, className = "" }) => (
+            <div className={`glass-panel p-6 ${className}`}>
+                {children}
+            </div>
+        );
+
+        const Metric = ({ title, value, subtext, isDanger = false }) => (
+            <div className={`glass-panel p-4 ${isDanger ? 'metric-glow-danger' : 'metric-glow'}`}>
+                <p className="text-gray-400 text-sm uppercase tracking-wider mb-1">{title}</p>
+                <h3 className={`text-2xl font-bold ${isDanger ? 'text-red-400' : 'text-white'}`}>{value}</h3>
+                {subtext && <p className="text-xs text-gray-500 mt-2">{subtext}</p>}
+            </div>
+        );
+
+        const Badge = ({ level }) => {
+            const colors = {
+                "LOW": "bg-green-500/20 text-green-400 border-green-500",
+                "MEDIUM": "bg-yellow-500/20 text-yellow-400 border-yellow-500",
+                "HIGH": "bg-orange-500/20 text-orange-400 border-orange-500",
+                "CRITICAL": "bg-red-500/20 text-red-400 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]"
+            };
+            const col = colors[level] || colors["LOW"];
+            return (
+                <span className={`px-3 py-1 text-xs font-bold rounded-full border ${col} uppercase`}>
+                    {level}
+                </span>
+            );
+        };
+
+        const Icon = ({ name, className }) => {
+            const spanRef = useRef(null);
+            useEffect(() => {
+                if (spanRef.current) {
+                    const i = document.createElement('i');
+                    i.setAttribute('data-lucide', name);
+                    if (className) i.setAttribute('class', className);
+                    spanRef.current.innerHTML = '';
+                    spanRef.current.appendChild(i);
+                    if (window.lucide) {
+                        window.lucide.createIcons({ root: spanRef.current });
+                    }
+                }
+            }, [name, className]);
+            return <span ref={spanRef} dangerouslySetInnerHTML={{ __html: '' }} className="inline-flex content-center items-center" />;
+        };
+
+        // ==========================================
+        // MAIN APP
+        // ==========================================
+
+        const App = () => {
+            const [mode, setMode] = useState("live"); // 'live' or 'batch'
+            const [strictMode, setStrictMode] = useState(false);
+
+            // Live Simulation State
+            const [transactions, setTransactions] = useState([]);
+            const [isScanning, setIsScanning] = useState(false);
+            const [selectedTxn, setSelectedTxn] = useState(null);
+
+            // Batch State
+            const [batchResults, setBatchResults] = useState(null);
+            const [isUploading, setIsUploading] = useState(false);
+
+            // Simulation Effect
+            useEffect(() => {
+                if (mode !== "live") return;
+
+                const fetchRandomTxn = async () => {
+                    setIsScanning(true);
+                    try {
+                        // In reality, this would hit a websocket or random generator endpoint.
+                        // For the hackathon demo, we will ping FastAPI to generate or fetch a row
+                        const res = await fetch(`${API_URL}/api/simulate?strict=${strictMode}`);
+                        const data = await res.json();
+
+                        setTransactions(prev => [data, ...prev].slice(0, 15)); // Keep last 15
+
+                        // If it's a fraud transaction, auto-select it to show Gemini report
+                        if (data.risk_level === "CRITICAL" || data.risk_level === "HIGH") {
+                            setSelectedTxn(data);
+                        }
+                    } catch (e) {
+                        console.error("Simulation error", e);
+                    }
+                    setIsScanning(false);
+                };
+
+                const interval = setInterval(() => {
+                    if (Math.random() > 0.3) { // 70% chance to fetch a txn every tick
+                        fetchRandomTxn();
+                    }
+                }, 3000); // Check every 3 seconds
+
+                return () => clearInterval(interval);
+            }, [mode, strictMode]);
+
+            return (
+                <div className="flex h-screen w-full">
+                    {/* SIDEBAR */}
+                    <div className="w-64 glass-panel border-y-0 border-l-0 rounded-none flex flex-col p-6 z-10">
+                        <div className="flex items-center gap-3 mb-10">
+                            <Icon name="shield-alert" className="text-teal-400 w-8 h-8" />
+                            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-emerald-400">
+                                Govinda AI
+                            </h1>
+                        </div>
+
+                        <div className="space-y-2 mb-8">
+                            <p className="text-xs text-slate-400 uppercase tracking-wider mb-2 font-semibold">Modes</p>
+
+                            <button
+                                onClick={() => setMode("live")}
+                                className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-all ${mode === 'live' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'text-slate-400 hover:bg-slate-800'}`}
+                            >
+                                <Icon name="activity" className="w-5 h-5" />
+                                Live Network
+                            </button>
+
+                            <button
+                                onClick={() => setMode("batch")}
+                                className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-all ${mode === 'batch' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'text-slate-400 hover:bg-slate-800'}`}
+                            >
+                                <Icon name="upload-cloud" className="w-5 h-5" />
+                                Batch Analysis
+                            </button>
+                        </div>
+
+                        <div className="mt-auto">
+                            <div className="glass-panel p-4 bg-slate-800/50">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                                        <Icon name="zap" className="w-4 h-4 text-yellow-400" />
+                                        Strict Mode
+                                    </span>
+                                    <button
+                                        onClick={() => setStrictMode(!strictMode)}
+                                        className={`w-10 h-5 rounded-full relative transition-colors ${strictMode ? 'bg-red-500' : 'bg-slate-600'}`}
+                                    >
+                                        <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-transform ${strictMode ? 'translate-x-6' : 'translate-x-1'}`}></div>
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500">Enable during network threats to boost anomaly detection sensitivity.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* MAIN CONTENT DIV */}
+                    <div className="flex-1 flex flex-col p-8 overflow-y-auto">
+                        <header className="mb-8 flex justify-between items-end">
+                            <div>
+                                <h1 className="text-3xl font-bold text-white mb-2">Fraud Intelligence Dashboard</h1>
+                                <p className="text-slate-400">Real-time ensemble models with Deep Learning autoencoders.</p>
+                            </div>
+                            <div className="flex gap-4">
+                                <Metric title="Active Models" value="4" subtext="Fusion Mode" />
+                                <Metric title="Defense Level" value={strictMode ? 'ELEVATED' : 'NORMAL'} isDanger={strictMode} />
+                            </div>
+                        </header>
+
+                        {mode === "live" ? (
+                            <LiveView
+                                transactions={transactions}
+                                isScanning={isScanning}
+                                selectedTxn={selectedTxn}
+                                setSelectedTxn={setSelectedTxn}
+                            />
+                        ) : (
+                            <BatchView
+                                strictMode={strictMode}
+                                batchResults={batchResults}
+                                setBatchResults={setBatchResults}
+                                isUploading={isUploading}
+                                setIsUploading={setIsUploading}
+                            />
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // SUB-VIEWS
+        // ==========================================
+
+        const LiveView = ({ transactions, isScanning, selectedTxn, setSelectedTxn }) => {
+            return (
+                <div className="grid grid-cols-12 gap-6 h-full">
+
+                    {/* LEFT COL: STREAM */}
+                    <div className="col-span-4 flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                Live Stream
+                            </h3>
+                            {isScanning && <span className="text-xs text-teal-400">Scanning...</span>}
+                        </div>
+
+                        <div className="glass-panel p-2 flex-1 overflow-y-auto flex flex-col gap-2">
+                            <AnimatePresence>
+                                {transactions.length === 0 && !isScanning && (
+                                    <div className="text-center p-8 text-slate-500 text-sm">Waiting for transactions...</div>
+                                )}
+                                {transactions.map((txn, i) => (
+                                    <motion.div
+                                        key={txn.id || i}
+                                        initial={{ opacity: 0, x: -20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        layout
+                                        onClick={() => setSelectedTxn(txn)}
+                                        className={`p-3 rounded-lg border cursor-pointer transition-all hover:bg-slate-700/50 ${selectedTxn?.id === txn.id ? 'border-teal-500 bg-slate-700/80' : 'border-slate-700/50 bg-slate-800/30'
+                                            }`}
+                                    >
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="font-mono text-xs text-slate-400">TXN-{txn.id?.toString().slice(0, 6)}</span>
+                                            <span className="font-bold text-white">${txn.amount?.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <Badge level={txn.risk_level} />
+                                            <span className="text-xs text-slate-500">{txn.score?.toFixed(1)}% Risk</span>
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+
+                    {/* RIGHT COL: ANALYSIS */}
+                    <div className="col-span-8 flex flex-col gap-6">
+                        {selectedTxn ? (
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="h-full flex flex-col gap-6"
+                            >
+                                <div className="grid grid-cols-3 gap-4">
+                                    <Card>
+                                        <p className="text-slate-400 text-xs mb-1">Transaction Amount</p>
+                                        <p className="text-3xl font-bold">${selectedTxn.amount?.toFixed(2)}</p>
+                                    </Card>
+                                    <Card>
+                                        <p className="text-slate-400 text-xs mb-1">Risk Score (Ensemble)</p>
+                                        <p className="text-3xl font-bold">{selectedTxn.score?.toFixed(1)}%</p>
+                                    </Card>
+                                    <Card className={['CRITICAL', 'HIGH'].includes(selectedTxn.risk_level) ? 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.2)]' : 'border-green-500/50'}>
+                                        <p className="text-slate-400 text-xs mb-1">Final Verdict</p>
+                                        <Badge level={selectedTxn.risk_level} />
+                                    </Card>
+                                </div>
+
+                                {['CRITICAL', 'HIGH'].includes(selectedTxn.risk_level) && (
+                                    <div className="grid grid-cols-2 gap-4 mb-6">
+                                        <Card className="bg-slate-900/50 border-slate-700/50 p-4">
+                                            <p className="text-slate-500 text-xs tracking-widest uppercase mb-1 flex items-center gap-2"><Icon name="shopping-bag" className="w-3 h-3" /> Merchant Context</p>
+                                            <p className="text-sm text-slate-300 font-mono">{selectedTxn.merchant || "N/A"}</p>
+                                        </Card>
+                                        <Card className="bg-slate-900/50 border-slate-700/50 p-4">
+                                            <p className="text-slate-500 text-xs tracking-widest uppercase mb-1 flex items-center gap-2"><Icon name="globe" className="w-3 h-3" /> Network Origin (IP)</p>
+                                            <p className="text-sm text-slate-300 font-mono">{selectedTxn.ip_address || "N/A"}</p>
+                                        </Card>
+                                    </div>
+                                )}
+
+                                {['CRITICAL', 'HIGH'].includes(selectedTxn.risk_level) ? (
+                                    <Card className="flex-1 overflow-y-auto border-red-500/30 bg-red-950/10">
+                                        <div className="flex items-center gap-3 mb-6 border-b border-slate-700 pb-4">
+                                            <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                                                <Icon name="bot" className="text-indigo-400" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-lg font-bold text-white text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">Gemini Compliance Agent</h3>
+                                                <p className="text-xs text-slate-400">Automated Threat Analysis & SAR Generation</p>
+                                            </div>
+                                        </div>
+
+                                        {!selectedTxn.ai_report ? (
+                                            <div className="p-8 text-center bg-slate-800/50 rounded-lg flex flex-col items-center border border-slate-700">
+                                                <div className="typing-indicator mt-4 mb-4"><span></span><span></span><span></span></div>
+                                                <p className="text-slate-400">Gemini AI is analyzing the anomaly signatures...</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-6">
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                                        <Icon name="search" className="w-4 h-4" /> Deep Dive Analysis
+                                                    </h4>
+                                                    <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-5 text-slate-300 text-sm leading-relaxed font-mono">
+                                                        {selectedTxn.ai_report.split('\n').map((line, i) => (
+                                                            <p key={i} className="mb-2">{line}</p>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                                            <Icon name="file-text" className="w-4 h-4" /> Auto-Drafted SAR
+                                                        </h4>
+                                                        <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 text-xs text-slate-400 font-mono h-48 overflow-y-auto">
+                                                            {selectedTxn.sar_draft || "Generating SAR..."}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                                            <Icon name="mail-warning" className="w-4 h-4" /> Customer Outreach
+                                                        </h4>
+                                                        <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 text-xs text-slate-400 font-mono h-48 overflow-y-auto">
+                                                            {selectedTxn.customer_msg || "Generating draft..."}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </Card>
+                                ) : (
+                                    <Card className="flex-1 border-green-500/20 bg-green-950/10 flex items-center justify-center flex-col">
+                                        <Icon name="check-circle" className="w-16 h-16 text-green-500/50 mb-4" />
+                                        <h3 className="text-xl font-bold text-white mb-2">No Threats Detected</h3>
+                                        <p className="text-slate-400 text-center max-w-md">Transaction passed Autoencoder reconstruction limits and fell below Decision Tree splits.</p>
+                                    </Card>
+                                )}
+                            </motion.div>
+                        ) : (
+                            <Card className="h-full flex items-center justify-center border-dashed border-2 border-slate-700 bg-transparent">
+                                <div className="text-center">
+                                    <Icon name="mouse-pointer-click" className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                                    <p className="text-slate-400">Select a transaction from the live stream to view deep analysis.</p>
+                                </div>
+                            </Card>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const BatchView = ({ strictMode, batchResults, setBatchResults, isUploading, setIsUploading }) => {
+
+            const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                setIsUploading(true);
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const res = await fetch(`${API_URL}/api/analyze/batch?strict_mode=${strictMode}`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await res.json();
+                    setBatchResults(data);
+                } catch (error) {
+                    console.error("Error uploading batch file:", error);
+                    alert("Failed to analyze CSV. Ensure backend is running.");
+                } finally {
+                    setIsUploading(false);
+                }
+            };
+
+            if (isUploading) {
+                return (
+                    <div key="loading" className="glass-panel p-12 text-center h-[600px] flex flex-col items-center justify-center border-dashed border-2 border-slate-600">
+                        <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-teal-500 mb-6"></div>
+                        <h2 className="text-2xl font-bold text-white mb-2">Analyzing Threat Vectors</h2>
+                        <p className="text-slate-400">Running dataset through PyTorch Autoencoders and XGBoost Ensemble...</p>
+                    </div>
+                );
+            }
+
+            if (batchResults) {
+                const { total_analyzed, total_flagged, highest_risk_analysis, results } = batchResults;
+                return (
+                    <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-6">
+                        <div className="grid grid-cols-3 gap-6">
+                            <Metric title="Total Scanned" value={total_analyzed} subtext="Transactions in Dataset" />
+                            <Metric title="Safe Network Traffic" value={total_analyzed - total_flagged} />
+                            <Metric title="Flagged Anomalies" value={total_flagged} isDanger={total_flagged > 0} />
+                        </div>
+
+                        {total_flagged > 0 && (
+                            <div className="flex flex-col gap-6">
+                                {results.filter(r => ['HIGH', 'CRITICAL'].includes(r.risk_level)).map((txn) => (
+                                    <Card key={txn.id} className="border-red-500/30 bg-red-950/20">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <h3 className="text-xl font-bold text-red-400 flex items-center gap-2">
+                                                <Icon name="alert-triangle" className="w-6 h-6" />
+                                                Threat Profile ID-{txn.id}
+                                            </h3>
+                                            <span className="text-slate-500 font-mono text-xs">Time Stamp: {txn.time.toFixed(1)}</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-6">
+                                            <div>
+                                                <p className="text-xs text-slate-400 mb-1 tracking-widest uppercase">Target Amount</p>
+                                                <p className="text-2xl font-mono text-white mb-4">${txn.amount.toFixed(2)}</p>
+
+                                                <p className="text-xs text-slate-400 mb-1 tracking-widest uppercase">Confidence Score</p>
+                                                <p className="text-2xl font-mono text-red-400 mb-4">{txn.score.toFixed(1)}%</p>
+
+                                                <div className="grid grid-cols-2 gap-2 mb-4">
+                                                    <div className="bg-slate-900/80 p-2 rounded border border-slate-700">
+                                                        <p className="text-[10px] text-slate-500 uppercase mb-1">Merchant</p>
+                                                        <p className="text-xs text-slate-300 truncate">{txn.merchant}</p>
+                                                    </div>
+                                                    <div className="bg-slate-900/80 p-2 rounded border border-slate-700">
+                                                        <p className="text-[10px] text-slate-500 uppercase mb-1">Source IP</p>
+                                                        <p className="text-xs text-slate-300 truncate">{txn.ip_address}</p>
+                                                    </div>
+                                                </div>
+
+                                                <Badge level={txn.risk_level} />
+                                            </div>
+                                            <div className="bg-slate-900/50 p-4 rounded-lg font-mono text-xs text-slate-300 border border-slate-700 h-48 overflow-y-auto">
+                                                <p className="text-teal-400 mb-2 font-bold uppercase">&gt;&gt; Agent Intelligence Report</p>
+                                                {(txn.ai_report || "AI Analysis unavailable or generating...").split('\n').map((line, i) => (
+                                                    <p key={i} className="mb-1">{line}</p>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </Card>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="mt-4 flex justify-end">
+                            <button
+                                onClick={() => setBatchResults(null)}
+                                className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-600"
+                            >
+                                Clear Results & Upload New
+                            </button>
+                        </div>
+                    </motion.div>
+                );
+            }
+
+            return (
+                <div key="upload" className="glass-panel p-12 text-center h-[600px] flex flex-col items-center justify-center border-dashed border-2 border-slate-600">
+                    <Icon name="file-spreadsheet" className="w-20 h-20 text-slate-500 mb-6" />
+                    <h2 className="text-2xl font-bold text-white mb-4">Batch CSV Upload</h2>
+                    <p className="text-slate-400 mb-8 max-w-md">Drag and drop a CSV file containing offline transactions to run them through the ensemble AI pipeline.</p>
+
+                    <label className="bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold py-3 px-8 rounded-lg cursor-pointer transition-colors shadow-[0_0_15px_rgba(20,184,166,0.3)] hover:shadow-[0_0_25px_rgba(20,184,166,0.5)]">
+                        Browse Files
+                        <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} />
+                    </label>
+                </div>
+            );
+        };
+
+        // Render React
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
